@@ -1,0 +1,192 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String       @id @default(uuid())
+  email        String       @unique
+  passwordHash String?      // Puede ser nulo si es social login directo
+  name         String
+  role         String       @default("student") // "student" | "company"
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  classes      Class[]
+  tasks        Task[]
+  reminders    Reminder[]
+  devices      Device[]
+  groups       StudyGroup[] @relation("GroupMembers")
+  subjects     Subject[]
+  projects     Project[]
+}
+
+model Subject {
+  id        String   @id @default(uuid())
+  name      String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  classes   Class[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model Project {
+  id        String   @id @default(uuid())
+  name      String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  classes   Class[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model Class {
+  id             String            @id @default(uuid())
+  title          String
+  audioUrl       String?           // URL en Firebase Storage o local
+  status         String            @default("Pendiente") // "Pendiente" | "Procesando" | "Listo" | "Error"
+  duration       String            @default("0min")
+  date           String            // e.g. "Hoy", "Ayer", "Lunes 25 may"
+  transcript     String?           @db.Text
+  summary        String?           @db.Text
+  userId         String
+  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  tasks          Task[]
+  reminders      Reminder[]
+  studyGroupId   String?
+  studyGroup     StudyGroup?       @relation(fields: [studyGroupId], references: [id])
+  
+  // Campos para hardware y modo empresarial
+  type           String            @default("Clase") // "Clase" | "Reunión" | "Conferencia" | "Tutoría" | "Laboratorio"
+  subjectId      String?
+  subject        Subject?          @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  projectId      String?
+  project        Project?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  meetingMinutes String?           @db.Text // Para el modo empresarial
+  
+  // Relaciones con entidades estructuradas
+  topics         Topic[]
+  exams          Exam[]
+  flashcards     Flashcard[]
+  ads            Ad[]
+  chunks         TranscriptChunk[] // Fragmentos vectoriales para RAG
+
+  @@index([userId])
+  @@index([subjectId])
+  @@index([projectId])
+  @@index([studyGroupId])
+}
+
+model TranscriptChunk {
+  id        String   @id @default(uuid())
+  classId   String
+  class     Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  content   String   @db.Text
+  embedding Float[]  // Usar Float[] en PostgreSQL para evitar requerir la extensión pgvector localmente
+
+  @@index([classId])
+}
+
+model Topic {
+  id      String @id @default(uuid())
+  name    String
+  classId String
+  class   Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  @@index([classId])
+}
+
+model Exam {
+  id      String @id @default(uuid())
+  title   String
+  date    String // Mantener String para conservar compatibilidad con el frontend
+  classId String
+  class   Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  @@index([classId])
+}
+
+model Flashcard {
+  id       String @id @default(uuid())
+  question String @db.Text
+  answer   String @db.Text
+  classId  String
+  class    Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  @@index([classId])
+}
+
+model Ad {
+  id          String @id @default(uuid())
+  description String @db.Text
+  classId     String
+  class       Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  @@index([classId])
+}
+
+model Task {
+  id          String   @id @default(uuid())
+  title       String
+  isCompleted Boolean  @default(false)
+  isUrgent    Boolean  @default(false)
+  dueDate     String   // Mantener String para conservar compatibilidad con el frontend
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  classId     String?
+  class       Class?   @relation(fields: [classId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+  @@index([classId])
+}
+
+model Reminder {
+  id        String   @id @default(uuid())
+  text      String
+  type      String   @default("info") // "urgent" | "warning" | "info"
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  classId   String?
+  class     Class?   @relation(fields: [classId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([classId])
+}
+
+model StudyGroup {
+  id         String   @id @default(uuid())
+  name       String
+  inviteCode String   @unique
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  members    User[]   @relation("GroupMembers")
+  classes    Class[]
+}
+
+model Device {
+  id         String   @id @default(uuid())
+  macAddress String   @unique
+  status     String   @default("inactive") // "active" | "inactive"
+  name       String?
+  lastSeenAt DateTime?
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([userId])
+}
