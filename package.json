@@ -6,8 +6,7 @@
   "scripts": {
     "build": "echo 'Build skip: usando dist local'",
     "start": "node dist/server.js",
-    "start:prod": "npx prisma generate && node dist/server.js",
-    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+    "start:prod": "node dist/server.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio"
