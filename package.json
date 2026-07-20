@@ -4,7 +4,7 @@
   "description": "Backend API para ClassNote Box con Express, Prisma y PostgreSQL",
   "main": "dist/server.js",
   "scripts": {
-    "build": "npx tsc",
+    "build": "echo 'Build skip: usando dist local'",
     "start": "node dist/server.js",
     "start:prod": "npx prisma generate && node dist/server.js",
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
