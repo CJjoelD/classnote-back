@@ -39,14 +39,18 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const bcrypt = __importStar(require("bcrypt"));
 const jwt = __importStar(require("jsonwebtoken"));
+const google_auth_library_1 = require("google-auth-library");
 const prisma_1 = __importDefault(require("../config/prisma"));
 const firebase_1 = require("../config/firebase");
+const logger_1 = require("../utils/logger");
 const router = (0, express_1.Router)();
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
-    console.error('[AUTH ERROR]: JWT_SECRET no está configurado en .env. El servidor no puede funcionar.');
+    logger_1.logger.error('AUTH ERROR', 'JWT_SECRET no está configurado en .env. El servidor no puede funcionar.');
     process.exit(1);
 }
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+const googleClient = new google_auth_library_1.OAuth2Client(GOOGLE_CLIENT_ID);
 // Helper: Generar JWT
 const generateToken = (userId, email, role) => {
     return jwt.sign({ id: userId, email, role }, JWT_SECRET, { expiresIn: '7d' });
@@ -89,7 +93,7 @@ router.post('/register', async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Error al registrar usuario:', error);
+        logger_1.logger.error('AUTH', 'Error al registrar usuario', error);
         return res.status(500).json({ message: 'Error interno en el servidor.' });
     }
 });
@@ -114,7 +118,7 @@ router.post('/login', async (req, res) => {
                     role: email === 'empresa@classnote.com' ? 'company' : 'student'
                 }
             });
-            console.log(`[AUTH]: Autocreado usuario demo de prueba en la BD: ${email}`);
+            logger_1.logger.info('AUTH', `Autocreado usuario demo de prueba en la BD: ${email}`);
         }
         if (!user) {
             return res.status(401).json({ message: 'Credenciales inválidas.' });
@@ -146,8 +150,93 @@ router.post('/login', async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Error al iniciar sesión:', error);
+        logger_1.logger.error('AUTH', 'Error al iniciar sesión', error);
         return res.status(500).json({ message: 'Error interno en el servidor.' });
+    }
+});
+// POST /api/auth/google
+// Autenticación con Google OAuth 2.0 sin Firebase.
+// Recibe un Google ID Token, lo verifica, y crea/busca el usuario.
+router.post('/google', async (req, res) => {
+    try {
+        const { idToken } = req.body;
+        if (!idToken) {
+            return res.status(400).json({ message: 'El idToken de Google es requerido.' });
+        }
+        if (!GOOGLE_CLIENT_ID) {
+            logger_1.logger.error('AUTH GOOGLE', 'GOOGLE_CLIENT_ID no está configurado en .env');
+            return res.status(500).json({ message: 'Google Auth no está configurado en el servidor.' });
+        }
+        // Verificar token con Google (valida audience, issuer, expiration)
+        const ticket = await googleClient.verifyIdToken({
+            idToken,
+            audience: GOOGLE_CLIENT_ID,
+        });
+        const payload = ticket.getPayload();
+        if (!payload || !payload.email) {
+            return res.status(401).json({ message: 'Token de Google inválido: no se pudo obtener el email.' });
+        }
+        const googleId = payload.sub;
+        const email = payload.email;
+        const name = payload.name || 'Usuario Google';
+        const avatar = payload.picture || null;
+        logger_1.logger.info('AUTH GOOGLE', `Token verificado → email=${email}, googleId=${googleId}`);
+        // Buscar usuario existente por googleId o por email
+        let user = await prisma_1.default.user.findFirst({
+            where: {
+                OR: [
+                    { googleId },
+                    { email }
+                ]
+            }
+        });
+        if (user) {
+            // Usuario existe: actualizar datos de Google si es necesario
+            const updateData = { updatedAt: new Date() };
+            if (!user.googleId)
+                updateData.googleId = googleId;
+            if (!user.avatar && avatar)
+                updateData.avatar = avatar;
+            if (user.provider !== 'GOOGLE')
+                updateData.provider = 'GOOGLE';
+            if (Object.keys(updateData).length > 1) {
+                user = await prisma_1.default.user.update({
+                    where: { id: user.id },
+                    data: updateData
+                });
+            }
+            logger_1.logger.info('AUTH GOOGLE', `Login existente → ${email} (id: ${user.id})`);
+        }
+        else {
+            // Usuario nuevo: crear
+            user = await prisma_1.default.user.create({
+                data: {
+                    email,
+                    name,
+                    googleId,
+                    avatar,
+                    provider: 'GOOGLE',
+                    role: 'student'
+                }
+            });
+            logger_1.logger.info('AUTH GOOGLE', `Nuevo usuario creado → ${email} (id: ${user.id})`);
+        }
+        const token = generateToken(user.id, user.email, user.role);
+        return res.json({
+            token,
+            user: {
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                avatar: user.avatar,
+                provider: user.provider
+            }
+        });
+    }
+    catch (error) {
+        logger_1.logger.error('AUTH GOOGLE', 'Error verificando token', error?.message || error);
+        return res.status(401).json({ message: 'Token de Google inválido o expirado.' });
     }
 });
 // POST /api/auth/firebase (Social Logins)
@@ -167,13 +256,13 @@ router.post('/firebase', async (req, res) => {
                 name = decodedToken.name || 'Usuario Social';
             }
             catch (fbError) {
-                console.error('Error de validación en Firebase Admin:', fbError);
+                logger_1.logger.error('FIREBASE', 'Error de validación en Firebase Admin', fbError);
                 return res.status(401).json({ message: 'Token de Firebase inválido.' });
             }
         }
         else {
             // Flujo de prueba / simulación (mock mode)
-            console.log(`[SIMULADOR DE FIREBASE]: Validando idToken para red social de proveedor: ${provider}`);
+            logger_1.logger.info('SIMULADOR DE FIREBASE', `Validando idToken para red social de proveedor: ${provider}`);
             email = `social-${provider}@universidad.edu`;
             name = `Estudiante ${provider.toUpperCase()}`;
         }
@@ -190,7 +279,7 @@ router.post('/firebase', async (req, res) => {
                     role: 'student'
                 }
             });
-            console.log(`[BD]: Registrado nuevo usuario de red social: ${email}`);
+            logger_1.logger.info('BD', `Registrado nuevo usuario de red social: ${email}`);
         }
         // Actualizar updatedAt para que la reasignación automática de dispositivos funcione
         await prisma_1.default.user.update({
@@ -209,7 +298,7 @@ router.post('/firebase', async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Error en Firebase Social Login:', error);
+        logger_1.logger.error('FIREBASE', 'Error en Firebase Social Login', error);
         return res.status(500).json({ message: 'Error interno en el servidor.' });
     }
 });

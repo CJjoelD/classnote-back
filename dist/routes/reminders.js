@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const prisma_1 = __importDefault(require("../config/prisma"));
 const auth_1 = require("../middleware/auth");
+const logger_1 = require("../utils/logger");
 const router = (0, express_1.Router)();
 // GET /api/reminders
 // Retorna recordatorios académicos y alertas extraídas de las clases
@@ -29,7 +30,7 @@ router.get('/', auth_1.authenticateToken, async (req, res) => {
         return res.json(reminders);
     }
     catch (error) {
-        console.error('Error al obtener recordatorios:', error);
+        logger_1.logger.error('REMINDERS', 'Error al obtener recordatorios:', error);
         return res.status(500).json({ message: 'Error interno en el servidor.' });
     }
 });

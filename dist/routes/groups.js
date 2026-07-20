@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const prisma_1 = __importDefault(require("../config/prisma"));
 const auth_1 = require("../middleware/auth");
+const logger_1 = require("../utils/logger");
 const router = (0, express_1.Router)();
 // Helper: Generar código de invitación aleatorio de 6 caracteres alfanuméricos
 const generateInviteCode = () => {
@@ -51,7 +52,7 @@ router.post('/', auth_1.authenticateToken, async (req, res) => {
         return res.status(201).json(newGroup);
     }
     catch (error) {
-        console.error('Error al crear grupo de estudio:', error);
+        logger_1.logger.error('GROUPS', 'Error al crear grupo de estudio:', error);
         return res.status(500).json({ message: 'Error interno en el servidor.' });
     }
 });
@@ -101,7 +102,7 @@ router.post('/join', auth_1.authenticateToken, async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Error al unirse al grupo:', error);
+        logger_1.logger.error('GROUPS', 'Error al unirse al grupo:', error);
         return res.status(500).json({ message: 'Error interno en el servidor.' });
     }
 });
@@ -141,7 +142,7 @@ router.get('/', auth_1.authenticateToken, async (req, res) => {
         return res.json(groups);
     }
     catch (error) {
-        console.error('Error al obtener grupos:', error);
+        logger_1.logger.error('GROUPS', 'Error al obtener grupos:', error);
         return res.status(500).json({ message: 'Error interno en el servidor.' });
     }
 });
@@ -184,7 +185,7 @@ router.post('/:groupId/share-class', auth_1.authenticateToken, async (req, res) 
         });
     }
     catch (error) {
-        console.error('Error al compartir clase en grupo:', error);
+        logger_1.logger.error('GROUPS', 'Error al compartir clase en grupo:', error);
         return res.status(500).json({ message: 'Error interno en el servidor.' });
     }
 });

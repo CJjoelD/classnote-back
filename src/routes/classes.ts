@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import prisma from '../config/prisma';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { transcribeAudio, analyzeTranscript } from '../services/openai';
+import { logger } from '../utils/logger';
 
 const router = Router();
 
@@ -52,12 +53,12 @@ async function processClassRecording(
   userId: string
 ) {
   try {
-    console.log(`[PROCESAMIENTO]: Iniciando transcripción para clase ID: ${classId}`);
+    logger.info('PROCESAMIENTO', `Iniciando transcripción para clase ID: ${classId}`);
 
     // 1. Transcribir el audio real
     const transcript = await transcribeAudio(filePath, rawTitle);
 
-    console.log(`[PROCESAMIENTO]: Transcripción completada. Generando análisis...`);
+    logger.info('PROCESAMIENTO', 'Transcripción completada. Generando análisis...');
 
     // 2. Analizar la transcripción con IA
     const analysis = await analyzeTranscript(transcript, rawTitle);
@@ -144,9 +145,9 @@ async function processClassRecording(
       }
     });
 
-    console.log(`[PROCESAMIENTO]: Clase ID ${classId} procesada con éxito.`);
+    logger.info('PROCESAMIENTO', `Clase ID ${classId} procesada con éxito.`);
   } catch (procError) {
-    console.error(`[PROCESAMIENTO ERROR]: Error al procesar clase ID ${classId}:`, procError);
+    logger.error('PROCESAMIENTO', `Error al procesar clase ID ${classId}`, procError);
     await prisma.class.update({
       where: { id: classId },
       data: { status: 'Pendiente' }
@@ -199,7 +200,7 @@ router.post('/upload', authenticateToken, upload.single('audio'), async (req: Au
     // Iniciar procesamiento asíncrono en segundo plano
     processClassRecording(initialClass.id, file.path, title, userId);
   } catch (error) {
-    console.error('Error en el endpoint de subida:', error);
+    logger.error('UPLOAD', 'Error en el endpoint de subida', error);
     if (file && fs.existsSync(file.path)) {
       fs.unlinkSync(file.path);
     }
@@ -208,24 +209,42 @@ router.post('/upload', authenticateToken, upload.single('audio'), async (req: Au
 });
 
 // POST /api/classes/upload-hardware
-// Recibe audio de forma directa de un dispositivo físico ESP32 emparejado por dirección MAC
+// Recibe audio raw (binary) del ESP32.
+// Identificacion por X-Device-Id o X-Device-MAC (fallback).
+// Responde 202 inmediatamente y procesa en background.
 router.post('/upload-hardware', async (req: any, res: Response) => {
+  const startTime = Date.now();
+  const rawDeviceId = req.headers['x-device-id'];
   const rawMac = req.headers['x-device-mac'];
+  const deviceIp = req.ip || req.socket.remoteAddress || 'unknown';
 
-  if (!rawMac || typeof rawMac !== 'string') {
-    return res.status(400).json({ message: 'Dirección MAC del hardware no proporcionada en la cabecera X-Device-MAC.' });
+  logger.info('UPLOAD-HW', '=== NUEVA PETICIÓN ===');
+  logger.info('UPLOAD-HW', `IP dispositivo: ${deviceIp}`);
+  logger.info('UPLOAD-HW', `Headers recibidos: ${JSON.stringify({
+    'x-device-id': rawDeviceId || '(no presente)',
+    'x-device-mac': rawMac || '(no presente)',
+    'content-type': req.headers['content-type'] || '(no presente)',
+    'content-length': req.headers['content-length'] || '(no presente)',
+  })}`);
+
+  // Identificar deviceId: priorizar X-Device-Id, fallback a X-Device-MAC
+  const resolvedDeviceId = rawDeviceId || rawMac;
+
+  if (!resolvedDeviceId || typeof resolvedDeviceId !== 'string') {
+    logger.info('UPLOAD-HW', 'RECHAZADO 400: Ningún header de identificación proporcionado');
+    return res.status(400).json({ message: 'X-Device-Id header es requerido.' });
   }
 
-  const cleanMac = rawMac.toUpperCase().trim();
+  logger.info('UPLOAD-HW', `DeviceId resuelto: ${resolvedDeviceId}`);
 
   try {
-    let device = await prisma.device.findUnique({
-      where: { macAddress: cleanMac }
+    // Buscar dispositivo por deviceId
+    let device = await prisma.device.findFirst({
+      where: { deviceId: resolvedDeviceId }
     });
 
-    // Auto-registrar si no existe
     if (!device) {
-      // Buscar el usuario real más reciente (no el system)
+      logger.info('UPLOAD-HW', `Dispositivo ${resolvedDeviceId} no encontrado, auto-registrando...`);
       const lastRealUser = await prisma.user.findFirst({
         where: { id: { not: 'system' } },
         orderBy: { updatedAt: 'desc' },
@@ -235,102 +254,97 @@ router.post('/upload-hardware', async (req: any, res: Response) => {
 
       device = await prisma.device.create({
         data: {
-          macAddress: cleanMac,
+          deviceId: resolvedDeviceId,
+          macAddress: rawMac || undefined,
           status: 'active',
           name: 'ClassNote Box',
           userId: defaultUserId,
-          lastSeenAt: new Date()
+          lastSeenAt: new Date(),
+          isOnline: true
         }
       });
-      console.log(`[HARDWARE]: ESP32 auto-registrado: ${cleanMac} → usuario ${defaultUserId}`);
+      logger.info('UPLOAD-HW', `Dispositivo auto-registrado: ${resolvedDeviceId} → usuario ${defaultUserId}`);
     }
 
-    // Actualizar lastSeenAt y reactivar si estaba inactivo
-    const updateData: any = { lastSeenAt: new Date() };
+    // Actualizar lastSeenAt e isOnline
+    const updateData: any = { lastSeenAt: new Date(), isOnline: true };
     if (device.status === 'inactive') {
       updateData.status = 'active';
     }
     await prisma.device.update({ where: { id: device.id }, data: updateData });
 
-    // Siempre reasignar al usuario real más reciente (no 'system')
+    // Reasignar al usuario real mas reciente
     let userId = device.userId;
-    if (userId === 'system' || true) {
-      const lastRealUser = await prisma.user.findFirst({
-        where: { id: { not: 'system' } },
-        orderBy: { updatedAt: 'desc' },
-        select: { id: true }
-      });
-      if (lastRealUser && userId !== lastRealUser.id) {
-        console.log(`[HARDWARE]: Dispositivo ${cleanMac} reasignado de '${userId}' → '${lastRealUser.id}'`);
-        userId = lastRealUser.id;
-        await prisma.device.update({ where: { id: device.id }, data: { userId } });
-      }
+    const lastRealUser = await prisma.user.findFirst({
+      where: { id: { not: 'system' } },
+      orderBy: { updatedAt: 'desc' },
+      select: { id: true }
+    });
+    if (lastRealUser && userId !== lastRealUser.id) {
+      logger.info('UPLOAD-HW', `Reasignado '${userId}' → '${lastRealUser.id}'`);
+      userId = lastRealUser.id;
+      await prisma.device.update({ where: { id: device.id }, data: { userId } });
     }
 
-    // Crear un archivo temporal para guardar el audio en disco (raw binary data)
+    // Recibir body raw en buffer
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const audioBuffer = Buffer.concat(chunks);
+
+    logger.info('UPLOAD-HW', `Audio recibido: ${audioBuffer.length} bytes de ${resolvedDeviceId}`);
+
+    if (audioBuffer.length === 0) {
+      logger.info('UPLOAD-HW', 'RECHAZADO 400: Body vacío');
+      return res.status(400).json({ message: 'No se recibió ningún dato de audio.' });
+    }
+
+    // Crear clase
+    const dateLabel = new Date().toLocaleDateString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    const defaultTitle = `Grabación Física IoT (${dateLabel})`;
+    const duration = estimateDuration(audioBuffer.length);
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
     const filename = `audio-hardware-${uniqueSuffix}.wav`;
-    const filePath = path.join(UPLOADS_DIR, filename);
+    const audioUrl = `/uploads/${filename}`;
 
-    const fileStream = fs.createWriteStream(filePath);
-    req.pipe(fileStream);
-
-    fileStream.on('error', (err) => {
-      console.error('[HARDWARE UPLOAD]: Error writing file stream:', err);
-      if (!res.headersSent) {
-        return res.status(500).json({ message: 'Error de escritura en el servidor.' });
+    const initialClass = await prisma.class.create({
+      data: {
+        title: defaultTitle,
+        audioUrl,
+        status: 'Procesando',
+        duration,
+        date: 'Hoy',
+        userId
       }
     });
 
-    fileStream.on('finish', async () => {
-      // Obtener el tamaño del archivo guardado
-      const stats = fs.statSync(filePath);
-      if (stats.size === 0) {
-        fs.unlinkSync(filePath);
-        if (!res.headersSent) {
-          return res.status(400).json({ message: 'No se recibió ningún dato de audio o el archivo está vacío.' });
-        }
+    const elapsed = Date.now() - startTime;
+    logger.info('UPLOAD-HW', `Clase ${initialClass.id} creada (${duration}, ${audioBuffer.length} bytes)`);
+    logger.info('UPLOAD-HW', `Respondiendo 202 (${elapsed}ms total)`);
+
+    // Responder 202 inmediatamente
+    res.status(202).json({
+      message: 'Grabación de hardware recibida. Procesando...',
+      class: initialClass
+    });
+
+    // Guardar archivo en disco en background
+    const filePath = path.join(UPLOADS_DIR, filename);
+    fs.writeFile(filePath, audioBuffer, (writeErr) => {
+      if (writeErr) {
+        logger.error('UPLOAD-HW', `Error escribiendo archivo ${filename}`, writeErr);
         return;
       }
+      logger.info('UPLOAD-HW', `Archivo ${filename} guardado en disco`);
+      logger.info('UPLOAD-HW', `Iniciando procesamiento IA para clase ${initialClass.id}`);
 
-      const dateLabel = new Date().toLocaleDateString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-      const defaultTitle = `Grabación Física IoT (${dateLabel})`;
-      const duration = estimateDuration(stats.size);
-      const audioUrl = `/uploads/${filename}`;
-
-      try {
-        // Crear el registro inicial con estatus "Procesando"
-        const initialClass = await prisma.class.create({
-          data: {
-            title: defaultTitle,
-            audioUrl,
-            status: 'Procesando',
-            duration,
-            date: 'Hoy',
-            userId
-          }
-        });
-
-        // Responder exitosamente al hardware
-        res.status(202).json({
-          message: 'Grabación de hardware recibida. Procesando...',
-          class: initialClass
-        });
-
-        // Iniciar procesamiento de IA en segundo plano
-        processClassRecording(initialClass.id, filePath, defaultTitle, userId);
-      } catch (dbError) {
-        console.error('[HARDWARE UPLOAD]: Error guardando en base de datos:', dbError);
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-        }
-        if (!res.headersSent) {
-          return res.status(500).json({ message: 'Error interno en el servidor.' });
-        }
-      }
+      // Iniciar procesamiento de IA en background
+      processClassRecording(initialClass.id, filePath, defaultTitle, userId);
     });
   } catch (error) {
-    console.error('Error en el endpoint de subida de hardware:', error);
+    const elapsed = Date.now() - startTime;
+    logger.error('UPLOAD-HW', `ERROR para ${resolvedDeviceId} (${elapsed}ms)`, error);
     return res.status(500).json({ message: 'Error interno en el servidor.' });
   }
 });
@@ -380,7 +394,7 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
 
     return res.json(formattedClasses);
   } catch (error) {
-    console.error('Error al obtener clases:', error);
+    logger.error('CLASES', 'Error al obtener clases', error);
     return res.status(500).json({ message: 'Error al consultar clases.' });
   }
 });
@@ -414,7 +428,7 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response) =>
 
     return res.json(classDetail);
   } catch (error) {
-    console.error('Error al obtener detalle de clase:', error);
+    logger.error('CLASES', 'Error al obtener detalle de clase', error);
     return res.status(500).json({ message: 'Error al consultar detalles.' });
   }
 });
@@ -437,7 +451,7 @@ router.delete('/:id', authenticateToken, async (req: AuthRequest, res: Response)
     }
     return res.json({ message: 'Grabacion eliminada correctamente.' });
   } catch (error) {
-    console.error('Error al eliminar grabacion:', error);
+    logger.error('CLASES', 'Error al eliminar grabacion', error);
     return res.status(500).json({ message: 'No se pudo eliminar la grabacion.' });
   }
 });

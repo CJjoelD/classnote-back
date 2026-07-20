@@ -1,31 +1,32 @@
 import { OpenAI } from 'openai';
 import * as fs from 'fs';
 import { promises as fsPromises } from 'fs';
+import { logger } from '../utils/logger';
 
 const apiKey = process.env.OPENAI_API_KEY;
 let openai: OpenAI | null = null;
 
 if (apiKey && apiKey.trim() !== '') {
   openai = new OpenAI({ apiKey });
-  console.log('[OPENAI]: Inicializado con API Key.');
+  logger.info('OPENAI', 'Inicializado con API Key.');
 } else {
-  console.warn('[OPENAI WARNING]: No se encontró OPENAI_API_KEY en .env. Se usará el simulador inteligente de IA como fallback.');
+  logger.warn('OPENAI', 'No se encontró OPENAI_API_KEY en .env. Se usará el simulador inteligente de IA como fallback.');
 }
 
 // Deepgram para transcripción ultrarrápida (opcional)
 const deepgramApiKey = process.env.DEEPGRAM_API_KEY;
 if (deepgramApiKey) {
-  console.log('[DEEPGRAM]: API Key configurada para transcripción rápida.');
+  logger.info('DEEPGRAM', 'API Key configurada para transcripción rápida.');
 } else {
-  console.warn('[DEEPGRAM WARNING]: No se encontró DEEPGRAM_API_KEY en .env.');
+  logger.warn('DEEPGRAM', 'No se encontró DEEPGRAM_API_KEY en .env.');
 }
 
 // Groq para transcripción ultrarrápida con Whisper (opcional)
 const groqApiKey = process.env.GROQ_API_KEY;
 if (groqApiKey) {
-  console.log('[GROQ]: API Key configurada para transcripción rápida.');
+  logger.info('GROQ', 'API Key configurada para transcripción rápida.');
 } else {
-  console.warn('[GROQ WARNING]: No se encontró GROQ_API_KEY en .env.');
+  logger.warn('GROQ', 'No se encontró GROQ_API_KEY en .env.');
 }
 
 export interface IAProcessResult {
@@ -74,10 +75,10 @@ export async function transcribeAudio(
     const stat = await fsPromises.stat(filePath);
     fileExists = true;
     fileSize = stat.size;
-    console.log(`[DIAGNÓSTICO]: Archivo encontrado: ${filePath}`);
-    console.log(`[DIAGNÓSTICO]: Tamaño del WAV: ${fileSize} bytes (${(fileSize / 1024).toFixed(1)} KB)`);
+    logger.info('DIAG', `Archivo encontrado: ${filePath}`);
+    logger.info('DIAG', `Tamaño del WAV: ${fileSize} bytes (${(fileSize / 1024).toFixed(1)} KB)`);
   } catch {
-    console.error(`[DIAGNÓSTICO]: Archivo NO encontrado: ${filePath}`);
+    logger.error('DIAG', `Archivo NO encontrado: ${filePath}`);
     return generateMockTranscript(classTitle);
   }
 
@@ -91,9 +92,9 @@ export async function transcribeAudio(
     const numChannels = audioBuffer.readUInt16LE(22);
     const sampleRate = audioBuffer.readUInt32LE(24);
     const bitsPerSample = audioBuffer.readUInt16LE(34);
-    console.log(`[DIAGNÓSTICO]: Cabecera WAV: RIFF=${riff}, WAVE=${wave}, Canales=${numChannels}, SampleRate=${sampleRate}Hz, Bits=${bitsPerSample}`);
+    logger.info('DIAG', `Cabecera WAV: RIFF=${riff}, WAVE=${wave}, Canales=${numChannels}, SampleRate=${sampleRate}Hz, Bits=${bitsPerSample}`);
   } else {
-    console.warn(`[DIAGNÓSTICO]: Archivo muy pequeño (${fileSize} bytes), cabecera WAV incompleta.`);
+    logger.warn('DIAG', `Archivo muy pequeño (${fileSize} bytes), cabecera WAV incompleta.`);
   }
 
   // Verificar si hay actividad de audio (no solo silencio)
@@ -103,17 +104,17 @@ export async function transcribeAudio(
       sum += Math.abs(audioBuffer.readInt16LE(i));
     }
     const avgAmplitude = sum / ((fileSize - 44) / 2);
-    console.log(`[DIAGNÓSTICO]: Amplitud promedio del audio: ${avgAmplitude.toFixed(1)} (0=silencio total, ~3000-8000=normal)`);
+    logger.info('DIAG', `Amplitud promedio del audio: ${avgAmplitude.toFixed(1)} (0=silencio total, ~3000-8000=normal)`);
   }
 
   // 1. Groq (Whisper ultrarrápido - ~1-3 segundos)
   if (groqApiKey) {
     const maskedKey = groqApiKey.substring(0, 8) + '...' + groqApiKey.substring(groqApiKey.length - 4);
-    console.log(`[DIAGNÓSTICO]: Groq key presente: ${maskedKey} (longitud: ${groqApiKey.length})`);
+    logger.info('DIAG', `Groq key presente: ${maskedKey} (longitud: ${groqApiKey.length})`);
     try {
-      console.log('[GROQ]: Transcribiendo audio con Groq Whisper (ultrarrápido)...');
+      logger.info('GROQ', 'Transcribiendo audio con Groq Whisper (ultrarrápido)...');
       const file = new File([audioBuffer], 'audio.wav', { type: 'audio/wav' });
-      
+
       const formData = new FormData();
       formData.append('file', file);
       formData.append('model', 'whisper-large-v3');
@@ -128,14 +129,14 @@ export async function transcribeAudio(
         body: formData,
       });
 
-      console.log(`[DIAGNÓSTICO]: Groq respondió HTTP ${response.status} ${response.statusText}`);
+      logger.info('DIAG', `Groq respondió HTTP ${response.status} ${response.statusText}`);
       const resultText = await response.text();
-      console.log(`[DIAGNÓSTICO]: Groq respuesta completa: ${resultText.substring(0, 500)}`);
+      logger.info('DIAG', `Groq respuesta completa: ${resultText.substring(0, 500)}`);
 
       if (!response.ok) {
-        console.error(`[GROQ ERROR]: HTTP ${response.status} — ${resultText.substring(0, 300)}`);
+        logger.error('GROQ', `HTTP ${response.status} — ${resultText.substring(0, 300)}`);
       } else {
-        // Groq con response_format='text' devuelve texto plano, NO JSON
+        // Groq con `response_format='text'` devuelve texto plano, NO JSON
         // Intentar JSON.parse primero, si falla usar el texto directamente
         let transcript: string | null = null;
         try {
@@ -147,26 +148,26 @@ export async function transcribeAudio(
         }
 
         if (transcript && transcript.length > 0) {
-          console.log(`[GROQ]: Transcripción completada con éxito (${transcript.length} caracteres).`);
+          logger.info('GROQ', `Transcripción completada con éxito (${transcript.length} caracteres).`);
           return transcript;
         } else {
-          console.error('[GROQ ERROR]: Respuesta vacía o sin texto de transcripción.');
+          logger.error('GROQ', 'Respuesta vacía o sin texto de transcripción.');
         }
       }
     } catch (error: any) {
-      console.error(`[GROQ ERROR]: ${error.message || error}`);
+      logger.error('GROQ', `${error.message || error}`);
     }
   } else {
-    console.log('[DIAGNÓSTICO]: Groq DESCARTADO — no hay GROQ_API_KEY en .env');
+    logger.info('DIAG', 'Groq DESCARTADO — no hay GROQ_API_KEY en .env');
   }
 
   // 2. Deepgram (ultrarrápido - ~2-5 segundos)
   if (deepgramApiKey) {
     const maskedKey = deepgramApiKey.substring(0, 6) + '...' + deepgramApiKey.substring(deepgramApiKey.length - 4);
-    console.log(`[DIAGNÓSTICO]: Deepgram key presente: ${maskedKey} (longitud: ${deepgramApiKey.length})`);
+    logger.info('DIAG', `Deepgram key presente: ${maskedKey} (longitud: ${deepgramApiKey.length})`);
     try {
-      console.log('[DEEPGRAM]: Transcribiendo audio con Deepgram (ultrarrápido)...');
-      
+      logger.info('DEEPGRAM', 'Transcribiendo audio con Deepgram (ultrarrápido)...');
+
       const response = await fetch(
         'https://api.deepgram.com/v1/listen?model=nova-2&language=es&smart_format=true',
         {
@@ -179,54 +180,54 @@ export async function transcribeAudio(
         }
       );
 
-      console.log(`[DIAGNÓSTICO]: Deepgram respondió HTTP ${response.status} ${response.statusText}`);
+      logger.info('DIAG', `Deepgram respondió HTTP ${response.status} ${response.statusText}`);
       const resultText = await response.text();
-      console.log(`[DIAGNÓSTICO]: Deepgram respuesta completa: ${resultText.substring(0, 1000)}`);
+      logger.info('DIAG', `Deepgram respuesta completa: ${resultText.substring(0, 1000)}`);
 
       if (!response.ok) {
-        console.error(`[DEEPGRAM ERROR]: HTTP ${response.status} — ${resultText.substring(0, 300)}`);
+        logger.error('DEEPGRAM', `HTTP ${response.status} — ${resultText.substring(0, 300)}`);
       } else {
         const result = JSON.parse(resultText);
         const transcript = result.results?.channels?.[0]?.alternatives?.[0]?.transcript;
         const confidence = result.results?.channels?.[0]?.alternatives?.[0]?.confidence;
         const words = result.results?.channels?.[0]?.alternatives?.[0]?.words?.length || 0;
-        console.log(`[DIAGNÓSTICO]: Deepgram transcript="${(transcript || '').substring(0, 100)}" confidence=${confidence} words=${words}`);
+        logger.info('DIAG', `Deepgram transcript="${(transcript || '').substring(0, 100)}" confidence=${confidence} words=${words}`);
 
         if (transcript && transcript.trim().length > 0) {
-          console.log(`[DEEPGRAM]: Transcripción completada con éxito (${transcript.length} caracteres).`);
+          logger.info('DEEPGRAM', `Transcripción completada con éxito (${transcript.length} caracteres).`);
           return transcript.trim();
         } else {
-          console.error('[DEEPGRAM ERROR]: Transcript vacío. Posibles causas: audio sin voz, formato no soportado, o modelo no detectó habla.');
+          logger.error('DEEPGRAM', 'Transcript vacío. Posibles causas: audio sin voz, formato no soportado, o modelo no detectó habla.');
         }
       }
     } catch (error: any) {
-      console.error(`[DEEPGRAM ERROR]: ${error.message || error}`);
+      logger.error('DEEPGRAM', `${error.message || error}`);
     }
   } else {
-    console.log('[DIAGNÓSTICO]: Deepgram DESCARTADO — no hay DEEPGRAM_API_KEY en .env');
+    logger.info('DIAG', 'Deepgram DESCARTADO — no hay DEEPGRAM_API_KEY en .env');
   }
 
   // 3. OpenAI Whisper (~10-30 segundos)
   if (openai) {
-    console.log('[DIAGNÓSTICO]: OpenAI Whisper intentando...');
+    logger.info('DIAG', 'OpenAI Whisper intentando...');
     try {
       const fileStream = fs.createReadStream(filePath);
       const response = await openai.audio.transcriptions.create({
         file: fileStream,
         model: 'whisper-1',
       });
-      console.log('[DIAGNÓSTICO]: OpenAI Whisper completado con éxito.');
+      logger.info('DIAG', 'OpenAI Whisper completado con éxito.');
       return response.text;
     } catch (error: any) {
-      console.error(`[OPENAI ERROR]: ${error.message || error}`);
-      if (error.status) console.error(`[OPENAI ERROR]: HTTP ${error.status}`);
-      if (error.error?.error?.message) console.error(`[OPENAI ERROR]: ${error.error.error.message}`);
+      logger.error('OPENAI', `${error.message || error}`);
+      if (error.status) logger.error('OPENAI', `HTTP ${error.status}`);
+      if (error.error?.error?.message) logger.error('OPENAI', `${error.error.error.message}`);
     }
   } else {
-    console.log('[DIAGNÓSTICO]: OpenAI DESCARTADO — no hay OPENAI_API_KEY válida');
+    logger.info('DIAG', 'OpenAI DESCARTADO — no hay OPENAI_API_KEY válida');
   }
 
-  console.log('[DIAGNÓSTICO]: TODOS los servicios de transcripción fallaron. Usando mock como último recurso.');
+  logger.info('DIAG', 'TODOS los servicios de transcripción fallaron. Usando mock como último recurso.');
   return generateMockTranscript(classTitle);
 }
 
@@ -240,12 +241,12 @@ export async function analyzeTranscript(
 ): Promise<Omit<IAProcessResult, 'transcript'>> {
   const prompt = `
     Analiza la siguiente transcripción de la grabación "${classTitle}".
-    
+
     Transcripción:
     "${transcriptText}"
-    
+
     Identifica si se trata de una clase/entorno educativo (donde hay materias, profesores y exámenes) o una reunión de negocios/entorno corporativo (donde hay proyectos, líderes, acuerdos y compromisos).
-    
+
     Devuelve un objeto JSON estrictamente formateado de la siguiente manera:
     {
       "title": "Un título descriptivo e inteligente para la grabación basado en el contenido principal.",
@@ -270,7 +271,7 @@ export async function analyzeTranscript(
       "exams": [
         {
           "title": "Título del examen o entregable mayor detectado.",
-          "date": "Fecha aproximada o exacta del examen (ej: '18 abr' o '2025-04-18')"
+          "date": "Fecha aproximada o exacta del examen (ej: '18 abr' or '2025-04-18')"
         }
       ],
       "flashcards": [
@@ -291,7 +292,7 @@ export async function analyzeTranscript(
   // 1. OpenAI gpt-4o-mini
   if (openai) {
     try {
-      console.log('[DIAGNÓSTICO]: OpenAI gpt-4o-mini intentando análisis...');
+      logger.info('DIAG', 'OpenAI gpt-4o-mini intentando análisis...');
       const response = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
         messages: [{ role: 'user', content: prompt }],
@@ -300,23 +301,21 @@ export async function analyzeTranscript(
 
       const responseText = response.choices[0].message.content;
       if (responseText) {
-        console.log('[DIAGNÓSTICO]: OpenAI análisis completado con éxito.');
+        logger.info('DIAG', 'OpenAI análisis completado con éxito.');
         return JSON.parse(responseText);
       }
     } catch (error: any) {
-      console.error(`[OPENAI ANALYSIS ERROR]: ${error.message || error}`);
-      if (error.status) console.error(`[OPENAI ANALYSIS ERROR]: HTTP ${error.status}`);
-      if (error.error?.error?.message) console.error(`[OPENAI ANALYSIS ERROR]: ${error.error.error.message}`);
+      logger.error('OPENAI_ANALYSIS', `${error.message || error}`);
+      if (error.status) logger.error('OPENAI_ANALYSIS', `HTTP ${error.status}`);
+      if (error.error?.error?.message) logger.error('OPENAI_ANALYSIS', `${error.error.error.message}`);
     }
   } else {
-    console.log('[DIAGNÓSTICO]: OpenAI análisis DESCARTADO — no hay OPENAI_API_KEY válida');
+    logger.info('DIAG', 'OpenAI análisis DESCARTADO — no hay OPENAI_API_KEY válida');
   }
 
-  console.log('[DIAGNÓSTICO]: OpenAI análisis falló. Usando mock como último recurso.');
+  logger.info('DIAG', 'OpenAI análisis falló. Usando mock como último recurso.');
   return generateMockAnalysis(classTitle);
 }
-
-// --- FUNCIONES AUXILIARES DE SIMULACIÓN ---
 
 function generateMockTranscript(title: string): string {
   const lowercaseTitle = title.toLowerCase();
@@ -339,12 +338,7 @@ export function generateMockAnalysis(title: string): Omit<IAProcessResult, 'tran
       title: 'Clase de Base de Datos - Normalización y Árboles B+',
       type: 'Clase',
       subject: 'Base de Datos',
-      summary: `## 📌 Puntos Principales de la Clase
-    
-• **Tercera Forma Normal (3FN)**: Se analizó la necesidad de eliminar dependencias transitivas. Todos los campos de una tabla deben depender directamente y de forma exclusiva de la clave primaria.
-• **Problema de la Dependencia Transitiva**: Ocurre si un campo no clave determina a otro campo no clave (ej. CodigoPostal -> Ciudad).
-• **Árboles B+**: Se discutió su uso en índices para búsquedas óptimas en O(log N).
-• **Lectura Recomendada**: Capítulo 6 del libro guía sobre indexación y almacenamiento.`,
+      summary: `## 📌 Puntos Principales de la Clase\n\n• **Tercera Forma Normal (3FN)**: Se analizó la necesidad de eliminar dependencias transitivas. Todos los campos de una tabla deben depender directamente y de forma exclusiva de la clave primaria.\n• **Problema de la Dependencia Transitiva**: Ocurre si un campo no clave determina a otro campo no clave (ej. CodigoPostal -> Ciudad).\n• **Árboles B+**: Se discutió su uso en índices para búsquedas óptimas en O(log N).\n• **Lectura Recomendada**: Capítulo 6 del libro guía sobre indexación y almacenamiento.`,
       topics: ['Tercera Forma Normal (3FN)', 'Dependencia Transitiva', 'Árboles B+'],
       tasks: [
         { title: 'Terminar Lab 2 de Normalización', isUrgent: true, dueDate: '15 abr' },
@@ -369,17 +363,13 @@ export function generateMockAnalysis(title: string): Omit<IAProcessResult, 'tran
       meetingMinutes: undefined
     };
   }
-  
+
   if (lowercaseTitle.includes('reun') || lowercaseTitle.includes('proy') || lowercaseTitle.includes('soft') || lowercaseTitle.includes('ing')) {
     return {
       title: 'Reunión de Sincronización - Sprint Backlog',
       type: 'Reunión',
       project: 'Desarrollo',
-      summary: `## 📌 Puntos Principales del Sprint Sync
-    
-• **Avance del Sprint**: Se revisó el estado del Sprint Backlog actual. La mayoría de tareas están en desarrollo.
-• **Riesgos Identificados**: Retraso potencial en la integración del SDK.
-• **Próximos Pasos**: Pruebas unitarias de la API de carga.`,
+      summary: `## 📌 Puntos Principales del Sprint Sync\n\n• **Avance del Sprint**: Se revisó el estado del Sprint Backlog actual. La mayoría de tareas están en desarrollo.\n• **Riesgos Identificados**: Retraso potencial en la integración del SDK.\n• **Próximos Pasos**: Pruebas unitarias de la API de carga.`,
       topics: ['Avance del Sprint', 'Sprint Backlog', 'Bloqueantes técnicos'],
       tasks: [
         { title: 'Carlos: Finalizar API de carga de hardware', isUrgent: true, dueDate: 'Hoy' },
@@ -391,26 +381,15 @@ export function generateMockAnalysis(title: string): Omit<IAProcessResult, 'tran
       exams: [],
       flashcards: [],
       ads: [],
-      meetingMinutes: `### Acta de Reunión - Desarrollo S3
-      
-**Fecha**: 2026-07-08
-**Participantes**: Carlos (Líder), Sofía, Juan
-
-**Acuerdos Clave**:
-1. Se congelan los requisitos del firmware del ClassNote Box.
-2. Carlos subirá los endpoints actualizados hoy mismo.
-3. Se planifica la demo final para el próximo lunes.`
+      meetingMinutes: `### Acta de Reunión - Desarrollo S3\n\n**Fecha**: 2026-07-08\n**Participantes**: Carlos (Líder), Sofía, Juan\n\n**Acuerdos Clave**:\n1. Se congelan los requisitos del firmware del ClassNote Box.\n2. Carlos subirá los endpoints actualizados hoy mismo.\n3. Se planifica la demo final para el próximo lunes.`
     };
   }
 
   return {
     title: `Grabación de ${title}`,
     type: 'Clase',
-    summary: `## 📌 Resumen Conceptual de la Clase
-    
-• **Introducción a los conceptos clave**: Se introdujo el marco teórico de la materia de ${title}.
-• **Aplicaciones prácticas**: Explicación de ejemplos de la vida real sobre cómo aplicar el conocimiento de hoy.`,
-    topics: ['Conceptos introductorios', 'Marco teórico'],
+    summary: `## 📌 Resumen Conceptual de la Clase\n\n• **Introducción a los conceptos clave**: Se introdujo el marco teórico de la materia de ${title}.\n• **Aplicaciones prácticas**: Explicación de ejemplos de la vida real sobre cómo aplicar el conocimiento de hoy.`,
+    topics: ['Conceptos introductorios', 'Materia teórica'],
     tasks: [
       { title: `Estudiar conceptos clave de ${title}`, isUrgent: false, dueDate: 'Próxima semana' },
       { title: 'Completar lectura recomendada', isUrgent: false, dueDate: 'Mañana' }

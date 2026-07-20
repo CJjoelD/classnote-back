@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import prisma from '../config/prisma';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
+import { logger } from '../utils/logger';
 
 const router = Router();
 
@@ -18,7 +19,7 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
 
     return res.json(tasks);
   } catch (error) {
-    console.error('Error al obtener tareas:', error);
+    logger.error('TASKS', 'Error al obtener tareas:', error);
     return res.status(500).json({ message: 'Error interno en el servidor.' });
   }
 });
@@ -48,7 +49,7 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response) => {
 
     return res.status(201).json(newTask);
   } catch (error) {
-    console.error('Error al crear tarea:', error);
+    logger.error('TASKS', 'Error al crear tarea:', error);
     return res.status(500).json({ message: 'Error interno en el servidor.' });
   }
 });
@@ -84,7 +85,7 @@ router.put('/:id', authenticateToken, async (req: AuthRequest, res: Response) =>
 
     return res.json(updatedTask);
   } catch (error) {
-    console.error('Error al actualizar tarea:', error);
+    logger.error('TASKS', 'Error al actualizar tarea:', error);
     return res.status(500).json({ message: 'Error interno en el servidor.' });
   }
 });
@@ -113,7 +114,7 @@ router.delete('/:id', authenticateToken, async (req: AuthRequest, res: Response)
 
     return res.json({ message: 'Tarea eliminada con éxito.' });
   } catch (error) {
-    console.error('Error al eliminar tarea:', error);
+    logger.error('TASKS', 'Error al eliminar tarea:', error);
     return res.status(500).json({ message: 'Error interno en el servidor.' });
   }
 });

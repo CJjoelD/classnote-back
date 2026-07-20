@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import prisma from '../config/prisma';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
+import { logger } from '../utils/logger';
 
 const router = Router();
 
@@ -26,7 +27,7 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
 
     return res.json(reminders);
   } catch (error) {
-    console.error('Error al obtener recordatorios:', error);
+    logger.error('REMINDERS', 'Error al obtener recordatorios:', error);
     return res.status(500).json({ message: 'Error interno en el servidor.' });
   }
 });

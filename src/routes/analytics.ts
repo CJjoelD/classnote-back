@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import prisma from '../config/prisma';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
+import { logger } from '../utils/logger';
 
 const router = Router();
 
@@ -52,7 +53,7 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
       }
     });
   } catch (error) {
-    console.error('Error al generar analíticas:', error);
+    logger.error('ANALYTICS', 'Error al generar analíticas:', error);
     return res.status(500).json({ message: 'Error interno en el servidor.' });
   }
 });

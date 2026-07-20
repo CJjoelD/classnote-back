@@ -1,6 +1,7 @@
 import * as admin from 'firebase-admin';
 import * as fs from 'fs';
 import * as path from 'path';
+import { logger } from '../utils/logger';
 
 let firebaseAppInitialized = false;
 
@@ -24,15 +25,15 @@ try {
       });
       
       firebaseAppInitialized = true;
-      console.log('[FIREBASE]: Inicializado con éxito usando credenciales desde:', absoluteKeyPath);
+      logger.info('FIREBASE', 'Inicializado con éxito usando credenciales desde: ' + absoluteKeyPath);
     } else {
-      console.warn(`[FIREBASE WARNING]: No se encontró el archivo físico en: ${absoluteKeyPath}. Se usará el simulador.`);
+      logger.warn('FIREBASE', `No se encontró el archivo físico en: ${absoluteKeyPath}. Se usará el simulador.`);
     }
   } else {
-    console.warn('[FIREBASE WARNING]: No se encontró la variable FIREBASE_PRIVATE_KEY_PATH en el .env. Se usará el simulador.');
+    logger.warn('FIREBASE', 'No se encontró la variable FIREBASE_PRIVATE_KEY_PATH en el .env. Se usará el simulador.');
   }
 } catch (error) {
-  console.error('[FIREBASE ERROR]: Error al inicializar firebase-admin:', error);
+  logger.error('FIREBASE', 'Error al inicializar firebase-admin:', error);
 }
 
 export const isFirebaseInitialized = () => firebaseAppInitialized;

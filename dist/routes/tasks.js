@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const prisma_1 = __importDefault(require("../config/prisma"));
 const auth_1 = require("../middleware/auth");
+const logger_1 = require("../utils/logger");
 const router = (0, express_1.Router)();
 // GET /api/tasks
 // Obtiene todas las tareas del usuario logueado (tanto manuales como de IA)
@@ -21,7 +22,7 @@ router.get('/', auth_1.authenticateToken, async (req, res) => {
         return res.json(tasks);
     }
     catch (error) {
-        console.error('Error al obtener tareas:', error);
+        logger_1.logger.error('TASKS', 'Error al obtener tareas:', error);
         return res.status(500).json({ message: 'Error interno en el servidor.' });
     }
 });
@@ -48,7 +49,7 @@ router.post('/', auth_1.authenticateToken, async (req, res) => {
         return res.status(201).json(newTask);
     }
     catch (error) {
-        console.error('Error al crear tarea:', error);
+        logger_1.logger.error('TASKS', 'Error al crear tarea:', error);
         return res.status(500).json({ message: 'Error interno en el servidor.' });
     }
 });
@@ -80,7 +81,7 @@ router.put('/:id', auth_1.authenticateToken, async (req, res) => {
         return res.json(updatedTask);
     }
     catch (error) {
-        console.error('Error al actualizar tarea:', error);
+        logger_1.logger.error('TASKS', 'Error al actualizar tarea:', error);
         return res.status(500).json({ message: 'Error interno en el servidor.' });
     }
 });
@@ -105,7 +106,7 @@ router.delete('/:id', auth_1.authenticateToken, async (req, res) => {
         return res.json({ message: 'Tarea eliminada con éxito.' });
     }
     catch (error) {
-        console.error('Error al eliminar tarea:', error);
+        logger_1.logger.error('TASKS', 'Error al eliminar tarea:', error);
         return res.status(500).json({ message: 'Error interno en el servidor.' });
     }
 });

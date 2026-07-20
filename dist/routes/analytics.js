@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const prisma_1 = __importDefault(require("../config/prisma"));
 const auth_1 = require("../middleware/auth");
+const logger_1 = require("../utils/logger");
 const router = (0, express_1.Router)();
 // GET /api/analytics
 // Retorna estadísticas académicas del estudiante (tareas resueltas, horas estimadas, etc.)
@@ -50,7 +51,7 @@ router.get('/', auth_1.authenticateToken, async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Error al generar analíticas:', error);
+        logger_1.logger.error('ANALYTICS', 'Error al generar analíticas:', error);
         return res.status(500).json({ message: 'Error interno en el servidor.' });
     }
 });

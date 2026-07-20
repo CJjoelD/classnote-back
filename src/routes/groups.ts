@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import prisma from '../config/prisma';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
+import { logger } from '../utils/logger';
 
 const router = Router();
 
@@ -51,7 +52,7 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response) => {
 
     return res.status(201).json(newGroup);
   } catch (error) {
-    console.error('Error al crear grupo de estudio:', error);
+    logger.error('GROUPS', 'Error al crear grupo de estudio:', error);
     return res.status(500).json({ message: 'Error interno en el servidor.' });
   }
 });
@@ -106,7 +107,7 @@ router.post('/join', authenticateToken, async (req: AuthRequest, res: Response) 
       group: updatedGroup
     });
   } catch (error) {
-    console.error('Error al unirse al grupo:', error);
+    logger.error('GROUPS', 'Error al unirse al grupo:', error);
     return res.status(500).json({ message: 'Error interno en el servidor.' });
   }
 });
@@ -147,7 +148,7 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
 
     return res.json(groups);
   } catch (error) {
-    console.error('Error al obtener grupos:', error);
+    logger.error('GROUPS', 'Error al obtener grupos:', error);
     return res.status(500).json({ message: 'Error interno en el servidor.' });
   }
 });
@@ -196,7 +197,7 @@ router.post('/:groupId/share-class', authenticateToken, async (req: AuthRequest,
       class: updatedClass
     });
   } catch (error) {
-    console.error('Error al compartir clase en grupo:', error);
+    logger.error('GROUPS', 'Error al compartir clase en grupo:', error);
     return res.status(500).json({ message: 'Error interno en el servidor.' });
   }
 });

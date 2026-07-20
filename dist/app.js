@@ -38,8 +38,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
+const helmet_1 = __importDefault(require("helmet"));
+const compression_1 = __importDefault(require("compression"));
 const path = __importStar(require("path"));
-// Importar Rutas
 const auth_1 = __importDefault(require("./routes/auth"));
 const classes_1 = __importDefault(require("./routes/classes"));
 const tasks_1 = __importDefault(require("./routes/tasks"));
@@ -47,23 +48,91 @@ const reminders_1 = __importDefault(require("./routes/reminders"));
 const groups_1 = __importDefault(require("./routes/groups"));
 const devices_1 = __importDefault(require("./routes/devices"));
 const analytics_1 = __importDefault(require("./routes/analytics"));
+const admin_1 = __importDefault(require("./routes/admin"));
+const errorHandler_1 = require("./middleware/errorHandler");
+const rateLimiter_1 = require("./middleware/rateLimiter");
 const app = (0, express_1.default)();
-// Configurar middlewares
-app.use((0, cors_1.default)());
-app.use(express_1.default.json());
+const startTime = Date.now();
+// Seguridad
+app.use((0, helmet_1.default)({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+app.use((0, compression_1.default)());
+// CORS
+const allowedOrigins = process.env.CORS_ORIGINS
+    ? process.env.CORS_ORIGINS.split(',')
+    : ['*'];
+app.use((0, cors_1.default)({
+    origin: (origin, callback) => {
+        if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        }
+        else {
+            callback(new Error('No permitido por CORS'));
+        }
+    },
+    credentials: true,
+}));
+// Body parsing
+app.use(express_1.default.json({ limit: '10mb' }));
 app.use(express_1.default.urlencoded({ extended: true }));
-// Servir estáticos de audios subidos
+// Ocultar X-Powered-By (ya lo hace helmet, pero explícito)
+app.disable('x-powered-by');
+// Estáticos
 app.use('/uploads', express_1.default.static(path.join(__dirname, '../uploads')));
-// Registro de endpoints
-app.use('/api/auth', auth_1.default);
+// Rate limiters por ruta
+app.use('/api/auth', rateLimiter_1.authLimiter, auth_1.default);
+app.use('/api/classes/upload-hardware', rateLimiter_1.uploadLimiter);
 app.use('/api/classes', classes_1.default);
-app.use('/api/tasks', tasks_1.default);
-app.use('/api/reminders', reminders_1.default);
-app.use('/api/groups', groups_1.default);
+app.use('/api/tasks', rateLimiter_1.generalLimiter, tasks_1.default);
+app.use('/api/reminders', rateLimiter_1.generalLimiter, reminders_1.default);
+app.use('/api/groups', rateLimiter_1.generalLimiter, groups_1.default);
+app.use('/api/devices/heartbeat', rateLimiter_1.heartbeatLimiter);
 app.use('/api/devices', devices_1.default);
-app.use('/api/analytics', analytics_1.default);
-// Ruta de salud de la API
-app.get('/health', (req, res) => {
-    res.json({ status: 'ok', time: new Date() });
+app.use('/api/analytics', rateLimiter_1.generalLimiter, analytics_1.default);
+app.use('/api/admin', rateLimiter_1.adminLimiter, admin_1.default);
+// Health check mejorado
+app.get('/health', async (_req, res) => {
+    let dbStatus = 'ok';
+    try {
+        const { default: prisma } = await Promise.resolve().then(() => __importStar(require('./config/prisma')));
+        await prisma.$queryRaw `SELECT 1`;
+    }
+    catch {
+        dbStatus = 'error';
+    }
+    res.json({
+        status: dbStatus === 'ok' ? 'ok' : 'degraded',
+        database: dbStatus,
+        uptime: Math.floor((Date.now() - startTime) / 1000),
+        version: process.env.npm_package_version || '1.0.0',
+    });
 });
+// Métricas
+app.get('/metrics', async (_req, res) => {
+    try {
+        const { default: prisma } = await Promise.resolve().then(() => __importStar(require('./config/prisma')));
+        const mem = process.memoryUsage();
+        const [users, devices, classes] = await Promise.all([
+            prisma.user.count({ where: { id: { not: 'system' } } }),
+            prisma.device.count(),
+            prisma.class.count(),
+        ]);
+        res.json({
+            uptime: Math.floor((Date.now() - startTime) / 1000),
+            memory: {
+                rss: `${(mem.rss / 1048576).toFixed(1)} MB`,
+                heapUsed: `${(mem.heapUsed / 1048576).toFixed(1)} MB`,
+                heapTotal: `${(mem.heapTotal / 1048576).toFixed(1)} MB`,
+            },
+            cpu: process.cpuUsage(),
+            counts: { users, devices, classes },
+        });
+    }
+    catch (err) {
+        res.status(500).json({ error: 'No se pudieron obtener métricas.' });
+    }
+});
+// 404 para rutas no encontradas
+app.use(errorHandler_1.notFoundHandler);
+// Error handler global (debe ser el último)
+app.use(errorHandler_1.errorHandler);
 exports.default = app;

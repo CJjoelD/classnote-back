@@ -7,12 +7,20 @@ generator client {
   provider = "prisma-client-js"
 }
 
+enum AuthProvider {
+  LOCAL
+  GOOGLE
+}
+
 model User {
   id           String       @id @default(uuid())
   email        String       @unique
-  passwordHash String?      // Puede ser nulo si es social login directo
+  passwordHash String?
   name         String
-  role         String       @default("student") // "student" | "company"
+  role         String       @default("student")
+  provider     AuthProvider @default(LOCAL)
+  googleId     String?      @unique
+  avatar       String?
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
   classes      Class[]
@@ -22,6 +30,10 @@ model User {
   groups       StudyGroup[] @relation("GroupMembers")
   subjects     Subject[]
   projects     Project[]
+
+  @@index([role])
+  @@index([createdAt])
+  @@index([provider])
 }
 
 model Subject {
@@ -85,6 +97,8 @@ model Class {
   @@index([subjectId])
   @@index([projectId])
   @@index([studyGroupId])
+  @@index([status])
+  @@index([createdAt])
 }
 
 model TranscriptChunk {
@@ -178,15 +192,24 @@ model StudyGroup {
 }
 
 model Device {
-  id         String   @id @default(uuid())
-  macAddress String   @unique
-  status     String   @default("inactive") // "active" | "inactive"
-  name       String?
-  lastSeenAt DateTime?
-  userId     String
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id              String   @id @default(uuid())
+  deviceId        String   @unique
+  macAddress      String?
+  status          String   @default("inactive")
+  name            String?
+  lastSeenAt      DateTime?
+  ipAddress       String?
+  firmwareVersion String?
+  isOnline        Boolean  @default(false)
+  recordingState  String?
+  pendingCommand  String?
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   @@index([userId])
+  @@index([isOnline])
+  @@index([recordingState])
+  @@index([lastSeenAt])
 }
