@@ -4,8 +4,9 @@
   "description": "Backend API para ClassNote Box con Express, Prisma y PostgreSQL",
   "main": "dist/server.js",
   "scripts": {
-    "build": "tsc",
+    "build": "npx tsc",
     "start": "node dist/server.js",
+    "start:prod": "npx prisma generate && node dist/server.js",
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
