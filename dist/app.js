@@ -53,8 +53,13 @@ const errorHandler_1 = require("./middleware/errorHandler");
 const rateLimiter_1 = require("./middleware/rateLimiter");
 const app = (0, express_1.default)();
 const startTime = Date.now();
-// Seguridad
-app.use((0, helmet_1.default)({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+// 💡 CLAVE PARA RAILWAY: Confiar en el Reverse Proxy de Railway para obtener HTTPS y Host correcto
+app.set('trust proxy', true);
+// Seguridad: Permitir descarga de archivos multimedia (audios) desde orígenes cruzados (Vercel)
+app.use((0, helmet_1.default)({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    crossOriginEmbedderPolicy: false
+}));
 app.use((0, compression_1.default)());
 // CORS
 const allowedOrigins = process.env.CORS_ORIGINS
@@ -74,10 +79,15 @@ app.use((0, cors_1.default)({
 // Body parsing
 app.use(express_1.default.json({ limit: '10mb' }));
 app.use(express_1.default.urlencoded({ extended: true }));
-// Ocultar X-Powered-By (ya lo hace helmet, pero explícito)
+// Ocultar X-Powered-By
 app.disable('x-powered-by');
-// Estáticos
-app.use('/uploads', express_1.default.static(path.join(__dirname, '../uploads')));
+// Estáticos (Servir la carpeta uploads públicamente con cabeceras de origen cruzado para reproducción audio/media)
+app.use('/uploads', express_1.default.static(path.join(__dirname, '../uploads'), {
+    setHeaders: (res) => {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    }
+}));
 // Rate limiters por ruta
 app.use('/api/auth', rateLimiter_1.authLimiter, auth_1.default);
 app.use('/api/classes/upload-hardware', rateLimiter_1.uploadLimiter);

@@ -50,6 +50,16 @@ const UPLOADS_DIR = path.join(__dirname, '../../uploads');
 if (!fs.existsSync(UPLOADS_DIR)) {
     fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
+// Helper para construir la URL pública del audio garantizando HTTPS en producción
+const getPublicAudioUrl = (filename) => {
+    let baseUrl = process.env.SERVER_URL || 'https://classnote-back-production.up.railway.app';
+    if (process.env.NODE_ENV === 'production' && (baseUrl.includes('localhost') || baseUrl.startsWith('http://'))) {
+        baseUrl = 'https://classnote-back-production.up.railway.app';
+    }
+    baseUrl = baseUrl.replace(/\/+$/, '');
+    const cleanFilename = filename.startsWith('/') ? filename.slice(1) : filename;
+    return `${baseUrl}/uploads/${cleanFilename}`;
+};
 // Configuración de Multer
 const storage = multer_1.default.diskStorage({
     destination: (req, file, cb) => {
@@ -66,7 +76,6 @@ const upload = (0, multer_1.default)({
 });
 // Helper: Formatear duración de audio estimada para el registro
 const estimateDuration = (bytes) => {
-    // Estimación sencilla basada en tasas de bits comunes
     const totalSeconds = Math.ceil(bytes / 32000);
     const minutes = Math.floor(totalSeconds / 60);
     if (minutes === 0)
@@ -174,7 +183,7 @@ async function processClassRecording(classId, filePath, rawTitle, userId) {
     }
 }
 // POST /api/classes/upload
-// Sube el archivo y ejecuta el procesamiento con Whisper + GPT de forma síncrona o asíncrona
+// Sube el archivo y ejecuta el procesamiento con Whisper + GPT
 router.post('/upload', auth_1.authenticateToken, upload.single('audio'), async (req, res) => {
     const file = req.file;
     const { title } = req.body;
@@ -191,8 +200,7 @@ router.post('/upload', auth_1.authenticateToken, upload.single('audio'), async (
     }
     try {
         const duration = estimateDuration(file.size);
-        const audioUrl = `/uploads/${file.filename}`;
-        // Crear el registro inicial con estatus "Procesando"
+        const audioUrl = getPublicAudioUrl(file.filename);
         const initialClass = await prisma_1.default.class.create({
             data: {
                 title,
@@ -203,12 +211,10 @@ router.post('/upload', auth_1.authenticateToken, upload.single('audio'), async (
                 userId
             }
         });
-        // Responder inmediatamente al cliente (Procesando) para evitar timeouts en conexiones
         res.status(202).json({
             message: 'Grabación recibida. La IA está procesando el archivo.',
             class: initialClass
         });
-        // Iniciar procesamiento asíncrono en segundo plano
         processClassRecording(initialClass.id, file.path, title, userId);
     }
     catch (error) {
@@ -221,8 +227,6 @@ router.post('/upload', auth_1.authenticateToken, upload.single('audio'), async (
 });
 // POST /api/classes/upload-hardware
 // Recibe audio raw (binary) del ESP32.
-// Identificacion por X-Device-Id o X-Device-MAC (fallback).
-// Responde 202 inmediatamente y procesa en background.
 router.post('/upload-hardware', async (req, res) => {
     const startTime = Date.now();
     const rawDeviceId = req.headers['x-device-id'];
@@ -236,7 +240,6 @@ router.post('/upload-hardware', async (req, res) => {
         'content-type': req.headers['content-type'] || '(no presente)',
         'content-length': req.headers['content-length'] || '(no presente)',
     })}`);
-    // Identificar deviceId: priorizar X-Device-Id, fallback a X-Device-MAC
     const resolvedDeviceId = rawDeviceId || rawMac;
     if (!resolvedDeviceId || typeof resolvedDeviceId !== 'string') {
         logger_1.logger.info('UPLOAD-HW', 'RECHAZADO 400: Ningún header de identificación proporcionado');
@@ -244,7 +247,6 @@ router.post('/upload-hardware', async (req, res) => {
     }
     logger_1.logger.info('UPLOAD-HW', `DeviceId resuelto: ${resolvedDeviceId}`);
     try {
-        // Buscar dispositivo por deviceId
         let device = await prisma_1.default.device.findFirst({
             where: { deviceId: resolvedDeviceId }
         });
@@ -269,13 +271,11 @@ router.post('/upload-hardware', async (req, res) => {
             });
             logger_1.logger.info('UPLOAD-HW', `Dispositivo auto-registrado: ${resolvedDeviceId} → usuario ${defaultUserId}`);
         }
-        // Actualizar lastSeenAt e isOnline
         const updateData = { lastSeenAt: new Date(), isOnline: true };
         if (device.status === 'inactive') {
             updateData.status = 'active';
         }
         await prisma_1.default.device.update({ where: { id: device.id }, data: updateData });
-        // Reasignar al usuario real mas reciente
         let userId = device.userId;
         const lastRealUser = await prisma_1.default.user.findFirst({
             where: { id: { not: 'system' } },
@@ -287,7 +287,6 @@ router.post('/upload-hardware', async (req, res) => {
             userId = lastRealUser.id;
             await prisma_1.default.device.update({ where: { id: device.id }, data: { userId } });
         }
-        // Recibir body raw en buffer
         const chunks = [];
         for await (const chunk of req) {
             chunks.push(chunk);
@@ -298,13 +297,13 @@ router.post('/upload-hardware', async (req, res) => {
             logger_1.logger.info('UPLOAD-HW', 'RECHAZADO 400: Body vacío');
             return res.status(400).json({ message: 'No se recibió ningún dato de audio.' });
         }
-        // Crear clase
         const dateLabel = new Date().toLocaleDateString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
         const defaultTitle = `Grabación Física IoT (${dateLabel})`;
         const duration = estimateDuration(audioBuffer.length);
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
         const filename = `audio-hardware-${uniqueSuffix}.wav`;
-        const audioUrl = `/uploads/${filename}`;
+        // ✅ URL absoluta garantizada apuntando a Railway
+        const audioUrl = getPublicAudioUrl(filename);
         const initialClass = await prisma_1.default.class.create({
             data: {
                 title: defaultTitle,
@@ -318,12 +317,10 @@ router.post('/upload-hardware', async (req, res) => {
         const elapsed = Date.now() - startTime;
         logger_1.logger.info('UPLOAD-HW', `Clase ${initialClass.id} creada (${duration}, ${audioBuffer.length} bytes)`);
         logger_1.logger.info('UPLOAD-HW', `Respondiendo 202 (${elapsed}ms total)`);
-        // Responder 202 inmediatamente
         res.status(202).json({
             message: 'Grabación de hardware recibida. Procesando...',
             class: initialClass
         });
-        // Guardar archivo en disco en background
         const filePath = path.join(UPLOADS_DIR, filename);
         fs.writeFile(filePath, audioBuffer, (writeErr) => {
             if (writeErr) {
@@ -332,7 +329,6 @@ router.post('/upload-hardware', async (req, res) => {
             }
             logger_1.logger.info('UPLOAD-HW', `Archivo ${filename} guardado en disco`);
             logger_1.logger.info('UPLOAD-HW', `Iniciando procesamiento IA para clase ${initialClass.id}`);
-            // Iniciar procesamiento de IA en background
             processClassRecording(initialClass.id, filePath, defaultTitle, userId);
         });
     }
@@ -343,7 +339,6 @@ router.post('/upload-hardware', async (req, res) => {
     }
 });
 // GET /api/classes
-// Obtiene el historial de clases del usuario logueado
 router.get('/', auth_1.authenticateToken, async (req, res) => {
     const userId = req.user?.id;
     if (!userId)
@@ -364,7 +359,6 @@ router.get('/', auth_1.authenticateToken, async (req, res) => {
                 project: { select: { name: true } }
             }
         });
-        // Formatear campo de fecha descriptiva basada en antigüedad
         const formattedClasses = classes.map((c) => {
             const diffMs = Date.now() - new Date(c.createdAt).getTime();
             const diffDays = Math.floor(diffMs / 86400000);
@@ -391,7 +385,6 @@ router.get('/', auth_1.authenticateToken, async (req, res) => {
     }
 });
 // GET /api/classes/:id
-// Obtiene el detalle completo de la clase, incluyendo resumen, tareas, recordatorios, flashcards y exámenes
 router.get('/:id', auth_1.authenticateToken, async (req, res) => {
     const userId = req.user?.id;
     const classId = req.params.id;
@@ -422,7 +415,6 @@ router.get('/:id', auth_1.authenticateToken, async (req, res) => {
     }
 });
 // DELETE /api/classes/:id
-// Elimina una grabacion propia, sus datos relacionados y el audio local si existe.
 router.delete('/:id', auth_1.authenticateToken, async (req, res) => {
     const userId = req.user?.id;
     const classId = req.params.id;
@@ -433,9 +425,14 @@ router.delete('/:id', auth_1.authenticateToken, async (req, res) => {
         if (!classToDelete)
             return res.status(404).json({ message: 'Grabacion no encontrada.' });
         await prisma_1.default.class.delete({ where: { id: classId } });
-        if (classToDelete.audioUrl?.startsWith('/uploads/')) {
-            const audioPath = path.join(UPLOADS_DIR, path.basename(classToDelete.audioUrl));
-            fs.unlink(audioPath, () => { });
+        if (classToDelete.audioUrl && classToDelete.audioUrl.includes('/uploads/')) {
+            const filename = classToDelete.audioUrl.split('/uploads/').pop();
+            if (filename) {
+                const audioPath = path.join(UPLOADS_DIR, filename);
+                if (fs.existsSync(audioPath)) {
+                    fs.unlink(audioPath, () => { });
+                }
+            }
         }
         return res.json({ message: 'Grabacion eliminada correctamente.' });
     }

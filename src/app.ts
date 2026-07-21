@@ -53,8 +53,13 @@ app.use(express.urlencoded({ extended: true }));
 // Ocultar X-Powered-By
 app.disable('x-powered-by');
 
-// Estáticos (Servir la carpeta uploads públicamente)
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+// Estáticos (Servir la carpeta uploads públicamente con cabeceras de origen cruzado para reproducción audio/media)
+app.use('/uploads', express.static(path.join(__dirname, '../uploads'), {
+  setHeaders: (res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  }
+}));
 
 // Rate limiters por ruta
 app.use('/api/auth', authLimiter, authRouter);

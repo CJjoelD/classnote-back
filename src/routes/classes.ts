@@ -15,6 +15,17 @@ if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
 
+// Helper para construir la URL pública del audio garantizando HTTPS en producción
+const getPublicAudioUrl = (filename: string): string => {
+  let baseUrl = process.env.SERVER_URL || 'https://classnote-back-production.up.railway.app';
+  if (process.env.NODE_ENV === 'production' && (baseUrl.includes('localhost') || baseUrl.startsWith('http://'))) {
+    baseUrl = 'https://classnote-back-production.up.railway.app';
+  }
+  baseUrl = baseUrl.replace(/\/+$/, '');
+  const cleanFilename = filename.startsWith('/') ? filename.slice(1) : filename;
+  return `${baseUrl}/uploads/${cleanFilename}`;
+};
+
 // Configuración de Multer
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -176,8 +187,7 @@ router.post('/upload', authenticateToken, upload.single('audio'), async (req: Au
 
   try {
     const duration = estimateDuration(file.size);
-    const baseUrl = process.env.SERVER_URL || 'https://classnote-back-production.up.railway.app';
-    const audioUrl = `${baseUrl}/uploads/${file.filename}`;
+    const audioUrl = getPublicAudioUrl(file.filename);
 
     const initialClass = await prisma.class.create({
       data: {
@@ -297,8 +307,7 @@ router.post('/upload-hardware', async (req: any, res: Response) => {
     const filename = `audio-hardware-${uniqueSuffix}.wav`;
     
     // ✅ URL absoluta garantizada apuntando a Railway
-    const baseUrl = process.env.SERVER_URL || 'https://classnote-back-production.up.railway.app';
-    const audioUrl = `${baseUrl}/uploads/${filename}`;
+    const audioUrl = getPublicAudioUrl(filename);
 
     const initialClass = await prisma.class.create({
       data: {
