@@ -177,7 +177,8 @@ router.post('/upload', authenticateToken, upload.single('audio'), async (req: Au
 
   try {
     const duration = estimateDuration(file.size);
-    const audioUrl = `/uploads/${file.filename}`;
+    const baseUrl = process.env.SERVER_URL || `${req.protocol}://${req.get('host')}`;
+    const audioUrl = `${baseUrl}/uploads/${file.filename}`;
 
     // Crear el registro inicial con estatus "Procesando"
     const initialClass = await prisma.class.create({
@@ -306,7 +307,8 @@ router.post('/upload-hardware', async (req: any, res: Response) => {
     const duration = estimateDuration(audioBuffer.length);
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
     const filename = `audio-hardware-${uniqueSuffix}.wav`;
-    const audioUrl = `/uploads/${filename}`;
+    const baseUrl = process.env.SERVER_URL || `${req.protocol}://${req.get('host')}`;
+    const audioUrl = `${baseUrl}/uploads/${filename}`;
 
     const initialClass = await prisma.class.create({
       data: {
@@ -445,9 +447,16 @@ router.delete('/:id', authenticateToken, async (req: AuthRequest, res: Response)
     if (!classToDelete) return res.status(404).json({ message: 'Grabacion no encontrada.' });
 
     await prisma.class.delete({ where: { id: classId } });
-    if (classToDelete.audioUrl?.startsWith('/uploads/')) {
-      const audioPath = path.join(UPLOADS_DIR, path.basename(classToDelete.audioUrl));
-      fs.unlink(audioPath, () => {});
+    
+    // Eliminación flexible del archivo físico sin importar la URL base
+    if (classToDelete.audioUrl && classToDelete.audioUrl.includes('/uploads/')) {
+      const filename = classToDelete.audioUrl.split('/uploads/').pop();
+      if (filename) {
+        const audioPath = path.join(UPLOADS_DIR, filename);
+        if (fs.existsSync(audioPath)) {
+          fs.unlink(audioPath, () => {});
+        }
+      }
     }
     return res.json({ message: 'Grabacion eliminada correctamente.' });
   } catch (error) {
