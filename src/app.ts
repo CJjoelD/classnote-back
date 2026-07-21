@@ -19,8 +19,15 @@ import { logger } from './utils/logger';
 const app = express();
 const startTime = Date.now();
 
-// Seguridad
-app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+// 💡 CLAVE PARA RAILWAY: Confiar en el Reverse Proxy de Railway para obtener HTTPS y Host correcto
+app.set('trust proxy', true);
+
+// Seguridad: Permitir descarga de archivos multimedia (audios) desde orígenes cruzados (Vercel)
+app.use(helmet({ 
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  crossOriginEmbedderPolicy: false
+}));
+
 app.use(compression());
 
 // CORS
@@ -43,10 +50,10 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Ocultar X-Powered-By (ya lo hace helmet, pero explícito)
+// Ocultar X-Powered-By
 app.disable('x-powered-by');
 
-// Estáticos
+// Estáticos (Servir la carpeta uploads públicamente)
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Rate limiters por ruta
